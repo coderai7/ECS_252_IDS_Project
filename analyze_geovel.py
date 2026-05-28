@@ -15,9 +15,13 @@ MAX_KMH = 1000
 with open("logs.txt") as f:
     reader = csv.DictReader(f)
     for row in reader:
-        ip = row['source_ip']
-        ts = datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00'))
-        lat, lon = float(row['latitude']), float(row['longitude'])
+        try:
+            ip = row['source_ip']
+            ts = datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00'))
+            lat, lon = float(row['latitude']), float(row['longitude'])
+        except (ValueError, KeyError):
+            continue   # skip rows with None
+
         if ip in last_seen:
             prev_ts, prev_lat, prev_lon = last_seen[ip]
             dist = haversine_km(prev_lat, prev_lon, lat, lon)
