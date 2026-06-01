@@ -10,6 +10,12 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     return 2 * R * asin(sqrt(a))
 
+# Load ground truth labels
+truth = {}
+with open("ground_truth.csv") as f:
+    for row in csv.DictReader(f):
+        truth[row['ip']] = row['label']
+
 # Dictionary for scores per ip address
 events = defaultdict(list)   # ip: [(timestamp, signal_name, value)]
 
@@ -58,9 +64,9 @@ try:
 except FileNotFoundError:
     pass
 
-# Correlate signals per IP within a time window
-WINDOW_SECONDS = 60
-THRESHOLD = 0.5
+# Correlation function
+window_seconds = 60
+threshold = 0.5
 
 def correlation_score(signals):
     weights = {"dns": 0.4, "geo_mismatch": 0.3, "geovel": 0.3}
@@ -74,20 +80,47 @@ def correlation_score(signals):
             score += weights["geovel"] * (1.0 if val > 5000 else 0.6)
     return round(score, 2)
 
-alerts = 0
+# Compare a set of alerted IPs against ground truth
+def evaluate(alerted_ips, config_name):
+    tp = sum(1 for ip in alerted_ips if truth.get(ip) == "malicious")
+    fp = sum(1 for ip in alerted_ips if truth.get(ip) == "benign")
+    fn = sum(1 for ip, lbl in truth.items() if lbl == "malicious" and ip not in alerted_ips)
+    tn = sum(1 for ip, lbl in truth.items() if lbl == "benign" and ip not in alerted_ips)
+    precision = tp / (tp + fp) if (tp + fp) else 0
+    recall    = tp / (tp + fn) if (tp + fn) else 0
+    fpr       = fp / (fp + tn) if (fp + tn) else 0
+    print(f"{config_name:<35} TP={tp:3d} FP={fp:3d} FN={fn:3d} TN={tn:3d} "
+          f"Precision={precision:.1%} Recall={recall:.1%} FPR={fpr:.1%}")
+
+# Run different configurations
+
+# DNS alone
+dns_alerts = {ip for ip, evs in events.items() if any(s == "dns" for _, s, _ in evs)}
+evaluate(dns_alerts, "DNS only")
+
+# Geo mismatch alone
+geo_alerts = {ip for ip, evs in events.items() if any(s == "geo_mismatch" for _, s, _ in evs)}
+evaluate(geo_alerts, "Geo mismatch only")
+
+# Geo-velocity alone
+geovel_alerts = {ip for ip, evs in events.items() if any(s == "geovel" for _, s, _ in evs)}
+evaluate(geovel_alerts, "Geo-velocity only")
+
+# Any signal fires
+any_alerts = set(events.keys())
+evaluate(any_alerts, "Any single signal (OR)")
+
+# Correlated (>= 2 signals, score >= threshold)
+corr_alerts = set()
 for ip, ev_list in events.items():
     ev_list.sort()
     for i, (ts, sig, val) in enumerate(ev_list):
         nearby = {sig: val}
         for ts2, sig2, val2 in ev_list[i+1:]:
-            if (ts2 - ts).total_seconds() > WINDOW_SECONDS:
+            if (ts2 - ts).total_seconds() > window_seconds:
                 break
             nearby[sig2] = val2
-        if len(nearby) >= 2:    # at least 2 different signals agree, change if you want more or less
-            corr = correlation_score(nearby)
-            if corr >= THRESHOLD:
-                print(f"🚨 {ip} at {ts.isoformat()} | signals: {nearby} | score: {corr:.2f}")
-                alerts += 1
-                break
-
-print(f"\nTotal correlated alerts: {alerts}")
+        if len(nearby) >= 2 and correlation_score(nearby) >= threshold:
+            corr_alerts.add(ip)
+            break
+evaluate(corr_alerts, f"Correlated (>=2 signals, thr={threshold})")
