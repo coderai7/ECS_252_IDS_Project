@@ -165,10 +165,15 @@ def check_hostname_geo_consistency(ip: str, timeStamp, source: str = "TCP/UDP"):
         result["mismatch_reason"] = "NO_PTR_RECORD"
         return result
 
+    print(hostname)
+
+    hostname = "server.example.jp"
 
     tld_key, tld_expected = get_tld_expected_countries(hostname)
 
-    region_key, region_expected = get_cloud_region_expected_countries(hostname)
+    hostname2 = "s3.ap-northeast-1.amazonaws.com"
+
+    region_key, region_expected = get_cloud_region_expected_countries(hostname2)
 
     if tld_expected:
         result["tld_or_region"] = tld_key
@@ -315,6 +320,8 @@ def dns_packet(pkt, timeStamp):
         return
 
     src = pkt[IP].src if pkt.haslayer(IP) else pkt[IPv6].src
+
+    domain = "xk2m9pqr7vb3nwt.io"
 
     entropy    = shannon_entropy(domain)
     length     = len(domain)
